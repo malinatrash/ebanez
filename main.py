@@ -39,7 +39,11 @@ def main():
     
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Обработка текстовых сообщений и стикеров
+    application.add_handler(MessageHandler(
+        (filters.TEXT | filters.Sticker.ALL) & ~filters.COMMAND,
+        handle_message
+    ))
     
     logging.info("Starting bot...")
     application.run_polling()

@@ -1,6 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes
-from .message_handlers import markov_generator, chat_stickers
+from .message_handlers import markov_generator, sticker_storage
 import logging
 import random
 
@@ -92,19 +92,19 @@ async def rebuild_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправить случайный стикер"""
+    if not update.message:
+        return
+        
     chat_id = update.effective_chat.id
+    stickers = sticker_storage.get_stickers(chat_id)
     
-    if chat_id not in chat_stickers or not chat_stickers[chat_id]:
+    if not stickers:
         await update.message.reply_text("❌ В этом чате пока нет сохраненных стикеров!")
         return
         
     try:
-        sticker_id = random.choice(chat_stickers[chat_id])
-        await context.bot.send_sticker(
-            chat_id=chat_id,
-            sticker=sticker_id
-        )
-        logger.info(f"Отправлен случайный стикер по команде в chat_id={chat_id}")
+        sticker_id = random.choice(stickers)
+        await context.bot.send_sticker(chat_id=chat_id, sticker=sticker_id)
     except Exception as e:
         logger.error(f"Ошибка при отправке стикера: {e}")
-        await update.message.reply_text("❌ Произошла ошибка при отправке стикера")
+        await update.message.reply_text("❌ Не удалось отправить стикер")
