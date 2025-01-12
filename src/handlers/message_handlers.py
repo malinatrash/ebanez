@@ -137,9 +137,10 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         # Получаем историю сообщений
         messages = []
         try:
-            async for message in context.bot.get_chat_history(chat_id, limit=100):
-                if message.text:
-                    messages.append(message.text)
+            async with context.application.bot.get_chat(chat_id) as chat:
+                async for message in chat.get_messages(limit=100):
+                    if message.text and not message.text.startswith('/'):
+                        messages.append(message)
             logger.info(f"Получено {len(messages)} сообщений из истории")
         except Exception as e:
             logger.error(f"Ошибка при получении истории: {e}")
@@ -147,7 +148,7 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         # Добавляем сообщения в базу
         added_count = 0
         for message in messages:
-            if markov_generator.add_message(chat_id, message):
+            if markov_generator.add_message(chat_id, message.text):
                 added_count += 1
         logger.info(f"Добавлено {added_count} сообщений в базу")
             
