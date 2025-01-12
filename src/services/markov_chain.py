@@ -1,21 +1,19 @@
 import markovify
 import os
 from pathlib import Path
-from typing import List, Optional
 from .database import Database
 import logging
 
 logger = logging.getLogger(__name__)
 
 class MarkovChainGenerator:
-    def __init__(self, state_size=1, min_messages=5):
+    def __init__(self, state_size=1, min_messages=20):
         """Инициализация генератора"""
         self.db = Database()
         self.state_size = state_size
-        self.min_messages = min_messages
+        self.min_messages = min_messages  # Минимум сообщений для первой модели
+        self.rebuild_every = 10  # Перестраивать каждые N сообщений после создания
         self.model = None
-        self.message_counter = 0
-        self.rebuild_threshold = 10
         self.models_dir = Path(__file__).parent.parent.parent / 'data' / 'models'
         self.models_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Директория для моделей: {self.models_dir}")
@@ -27,28 +25,53 @@ class MarkovChainGenerator:
         logger.info(f"Путь к модели: {model_path}")
         return model_path
 
-    def add_message(self, chat_id: int, message: str) -> bool:
-        """Добавление нового сообщения и обновление модели при необходимости"""
+    def is_valid_message(self, message: str) -> bool:
+        """Проверка валидности сообщения для обучения"""
+        if not message or not isinstance(message, str):
+            return False
+        # Сообщение должно быть не пустым и содержать хотя бы 2 символа
+        return len(message.strip()) > 2
+
+    def add_message(self, chat_id: int, message: str) -> tuple[bool, bool]:
+        """
+        Добавление нового сообщения и обновление модели при необходимости
+        Возвращает: (сообщение_добавлено, сообщение_валидно)
+        """
         try:
-            if self.db.add_message(chat_id, message):
-                # Получаем текущий счетчик сообщений для этого чата
-                stats = self.db.get_chat_stats(chat_id)
-                total_messages = stats['total_messages']
-                
-                # Проверяем, нужно ли обновить модель
-                if total_messages >= self.min_messages and total_messages % 10 == 0:
+            if not self.is_valid_message(message):
+                logger.info("Сообщение не прошло валидацию")
+                return False, False
+
+            # Добавляем сообщение в базу
+            if not self.db.add_message(chat_id, message):
+                return False, True
+
+            stats = self.db.get_chat_stats(chat_id)
+            total_messages = stats['total_messages']
+            model_exists = self.get_model_path(chat_id).exists()
+
+            if not model_exists:
+                # Модель еще не создана
+                if total_messages >= self.min_messages:
+                    logger.info(f"Достигнуто {total_messages} сообщений, создаю первую модель...")
+                    if self.rebuild_model(chat_id):
+                        logger.info("Первая модель успешно создана")
+                    else:
+                        logger.error("Не удалось создать первую модель")
+            else:
+                # Модель уже существует, проверяем необходимость перестройки
+                if total_messages % self.rebuild_every == 0:
                     logger.info(f"Достигнуто {total_messages} сообщений, обновляю модель...")
                     if self.rebuild_model(chat_id):
                         logger.info("Модель успешно обновлена")
                     else:
                         logger.error("Не удалось обновить модель")
-                else:
-                    logger.info(f"Сообщение добавлено, счетчик: {total_messages % 10}/10")
-                return True
+
+            return True, True
+
         except Exception as e:
             logger.error(f"Ошибка при добавлении сообщения: {e}")
-            return False
-        return False
+            return False, False
 
     def rebuild_model(self, chat_id: int):
         """Перестройка модели на основе всех сообщений чата"""
@@ -63,7 +86,7 @@ class MarkovChainGenerator:
                 return False
 
             # Фильтруем пустые сообщения и объединяем в текст
-            valid_messages = [msg for msg in messages if msg and len(msg.strip()) > 2]
+            valid_messages = [msg for msg in messages if self.is_valid_message(msg)]
             logger.info(f"Валидных сообщений: {len(valid_messages)}")
             
             if len(valid_messages) < self.min_messages:
@@ -189,22 +212,34 @@ class MarkovChainGenerator:
         
         # Проверяем статус модели
         if not model_exists:
-            model_status = "❌ Модель не создана"
-        elif stats['total_messages'] < self.min_messages:
-            model_status = f"⚠️ Недостаточно сообщений (нужно минимум {self.min_messages})"
+            valid_messages = len([msg for msg in self.db.get_messages(chat_id) if self.is_valid_message(msg)])
+            model_status = f"⏳ Сбор сообщений ({valid_messages}/{self.min_messages})"
+            progress = (valid_messages / self.min_messages) * 100
+            progress_bar = "▓" * int(progress/10) + "░" * (10 - int(progress/10))
         else:
             model_status = "✅ Модель готова"
+            progress_bar = "▓" * 10
+            
+        messages_until_action = (
+            self.min_messages - stats['total_messages'] 
+            if not model_exists 
+            else self.rebuild_every - (stats['total_messages'] % self.rebuild_every)
+        )
         
-        messages_until_rebuild = self.rebuild_threshold - (stats['total_messages'] % self.rebuild_threshold)
+        action_type = "создания" if not model_exists else "обновления"
         
         return (
-            f"📊 Статистика чата:\\n"
-            f"• Сообщений в базе: {stats['total_messages']}\\n"
-            f"• Средняя длина сообщения: {stats['avg_message_length']:.1f} символов\\n"
-            f"• Размер базы данных: {self.db.get_db_size() // 1024}KB\\n"
-            f"• Размер модели: {model_size}KB\\n"
-            f"• Статус модели: {model_status}\\n"
-            f"• Сообщений до следующей перестройки: {messages_until_rebuild}"
+            f"📊 *Статистика чата*\n\n"
+            f"*Сообщения:*\n"
+            f"└─ Всего в базе: `{stats['total_messages']}`\n"
+            f"└─ Средняя длина: `{stats['avg_message_length']:.1f}` символов\n\n"
+            f"*Хранилище:*\n"
+            f"└─ База данных: `{self.db.get_db_size() // 1024}KB`\n"
+            f"└─ Модель: `{model_size}KB`\n\n"
+            f"*Состояние модели:*\n"
+            f"└─ Статус: {model_status}\n"
+            f"└─ Прогресс: [{progress_bar}]\n"
+            f"└─ До {action_type}: `{messages_until_action}` сообщений"
         )
 
     def clear_memory(self, chat_id: int) -> bool:
@@ -220,7 +255,6 @@ class MarkovChainGenerator:
                 logger.info(f"Model file deleted: {model_path}")
             
             self.model = None
-            self.message_counter = 0
             logger.info(f"Memory cleared for chat {chat_id}")
             
             return True

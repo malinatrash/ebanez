@@ -17,14 +17,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать справку"""
     await update.message.reply_text(
-        "🤖 Я умею:\n\n"
-        "/start - Начать общение\n"
-        "/stats - Показать статистику обучения\n"
-        "/gen - Сгенерировать случайное сообщение\n"
-        "/clear - Очистить память этого чата\n"
-        "/rebuild - Обновить модель\n"
-        "/sticker - Отправить случайный стикер\n\n"
-        "❗️ Важно: я учусь на ваших сообщениях, поэтому сначала ответы могут быть странными"
+        "*🤖 Команды бота:*\n\n"
+        "*Основные:*\n"
+        "└─ /start - Начать общение\n"
+        "└─ /help - Показать это сообщение\n\n"
+        "*Обучение:*\n"
+        "└─ /stats - Статистика обучения\n"
+        "└─ /gen - Сгенерировать сообщение\n"
+        "└─ /clear - Очистить память чата\n"
+        "└─ /rebuild - Пересобрать модель\n\n"
+        "*Развлечения:*\n"
+        "└─ /sticker - Случайный стикер\n"
+        "└─ /top - Топ используемых слов\n"
+        "└─ /mood - Настроение чата\n\n"
+        "❗️ Бот учится на ваших сообщениях.\n"
+        "Первая модель создается после 20 сообщений.",
+        parse_mode='Markdown'
     )
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,3 +116,81 @@ async def sticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка при отправке стикера: {e}")
         await update.message.reply_text("❌ Не удалось отправить стикер")
+
+async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать топ используемых слов"""
+    chat_id = update.effective_chat.id
+    messages = markov_generator.db.get_messages(chat_id)
+    
+    if not messages:
+        await update.message.reply_text("❌ История сообщений пуста")
+        return
+        
+    # Собираем статистику слов
+    word_stats = {}
+    for msg in messages:
+        for word in msg.lower().split():
+            if len(word) > 2:  # Игнорируем короткие слова
+                word_stats[word] = word_stats.get(word, 0) + 1
+                
+    # Сортируем и берем топ-10
+    top_words = sorted(word_stats.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    # Форматируем ответ
+    response = "*📈 Топ-10 слов в чате:*\n\n"
+    for i, (word, count) in enumerate(top_words, 1):
+        response += f"{i}. `{word}`: {count} раз\n"
+        
+    await update.message.reply_text(response, parse_mode='Markdown')
+
+async def mood_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Анализ настроения чата"""
+    chat_id = update.effective_chat.id
+    messages = markov_generator.db.get_messages(chat_id)
+    
+    if not messages:
+        await update.message.reply_text("❌ История сообщений пуста")
+        return
+        
+    # Простой анализ настроения по эмодзи и ключевым словам
+    positive = ['😊', '😄', '👍', '❤️', 'круто', 'класс', 'супер', 'отлично']
+    negative = ['😢', '😠', '👎', '💔', 'плохо', 'ужас', 'отстой']
+    
+    pos_count = 0
+    neg_count = 0
+    
+    for msg in messages:
+        msg_lower = msg.lower()
+        for word in positive:
+            pos_count += msg_lower.count(word)
+        for word in negative:
+            neg_count += msg_lower.count(word)
+            
+    total = pos_count + neg_count
+    if total == 0:
+        mood = "😐 Нейтральное"
+        mood_bar = "▓" * 5 + "░" * 5
+    else:
+        mood_ratio = pos_count / total
+        if mood_ratio > 0.8:
+            mood = "🤩 Прекрасное"
+        elif mood_ratio > 0.6:
+            mood = "😊 Хорошее"
+        elif mood_ratio > 0.4:
+            mood = "🙂 Нормальное"
+        elif mood_ratio > 0.2:
+            mood = "😕 Так себе"
+        else:
+            mood = "😢 Грустное"
+        mood_bar = "▓" * int(mood_ratio * 10) + "░" * (10 - int(mood_ratio * 10))
+    
+    response = (
+        f"*🎭 Анализ настроения чата*\n\n"
+        f"*Текущее настроение:* {mood}\n"
+        f"*Настроение:* [{mood_bar}]\n\n"
+        f"*Статистика:*\n"
+        f"└─ Позитив: `{pos_count}`\n"
+        f"└─ Негатив: `{neg_count}`"
+    )
+    
+    await update.message.reply_text(response, parse_mode='Markdown')

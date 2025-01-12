@@ -10,7 +10,9 @@ from src.handlers.command_handlers import (
     generate_command,
     clear_command,
     rebuild_command,
-    sticker_command
+    sticker_command,
+    top_command,
+    mood_command
 )
 from src.handlers.message_handlers import handle_message, handle_my_chat_member
 
@@ -45,6 +47,8 @@ def main():
     application.add_handler(CommandHandler("clear", clear_command))
     application.add_handler(CommandHandler("rebuild", rebuild_command))
     application.add_handler(CommandHandler("sticker", sticker_command))
+    application.add_handler(CommandHandler("top", top_command))
+    application.add_handler(CommandHandler("mood", mood_command))
     
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     

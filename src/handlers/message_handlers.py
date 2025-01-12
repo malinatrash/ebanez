@@ -75,60 +75,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.startswith('/'):
         return
     
-    # Добавляем реакцию (20% шанс)
+    # Обрабатываем текстовое сообщение
+    if update.message.text:
+        message_text = update.message.text.strip()
+        
+        # Пропускаем команды
+        if message_text.startswith('/'):
+            return
+            
+        # Добавляем сообщение в базу для обучения
+        message_added, is_valid = markov_generator.add_message(chat_id, message_text)
+        
+        if message_added:
+            # Если модель еще не создана и сообщение валидное - реагируем 👀
+            model_path = markov_generator.get_model_path(chat_id)
+            if not model_path.exists() and is_valid:
+                try:
+                    await update.message.set_reaction([ReactionTypeEmoji("👀")])
+                    logger.info("Добавлена реакция 👀 к сообщению (валидное для обучения)")
+                except Exception as e:
+                    logger.error(f"Ошибка при добавлении реакции: {e}")
+            
+            # Случайным образом отвечаем на сообщение
+            if not model_path.exists() and random.random() < 0.1:  # 10% шанс
+                response = markov_generator.generate_response(chat_id)
+                if response:
+                    try:
+                        await update.message.reply_text(response)
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке ответа: {e}")
+    
+    # Случайным образом добавляем реакцию (20% шанс)
     if random.random() < 0.2:
         try:
-            reaction = random.choice(REACTIONS)
-            await context.bot.set_message_reaction(
-                chat_id=chat_id,
-                message_id=update.message.message_id,
-                reaction=[ReactionTypeEmoji(emoji=reaction)]
-            )
-            logger.info(f"Добавлена реакция {reaction} к сообщению")
+            await update.message.set_reaction([ReactionTypeEmoji(random.choice(REACTIONS))])
+            logger.info(f"Добавлена реакция {random.choice(REACTIONS)} к сообщению")
         except Exception as e:
-            logger.error(f"Ошибка при добавлении реакции: {str(e)}")
-    
-    # Отправляем случайный стикер (15% шанс)
-    if random.random() < 0.15:
-        stickers = sticker_storage.get_stickers(chat_id)
-        if stickers:
+            logger.error(f"Ошибка при добавлении реакции: {e}")
+
+    # Случайным образом отправляем стикер (10% шанс)
+    if random.random() < 0.1:
+        sticker_id = sticker_storage.get_random_sticker(chat_id)
+        if sticker_id:
             try:
-                sticker_id = random.choice(stickers)
-                logger.info(f"Отправка случайного стикера {sticker_id}")
-                await context.bot.send_sticker(chat_id=chat_id, sticker=sticker_id)
+                await update.message.reply_sticker(sticker_id)
             except Exception as e:
                 logger.error(f"Ошибка при отправке стикера: {str(e)}")
         else:
             logger.info(f"Нет доступных стикеров для chat_id={chat_id}")
-    
-    # Добавляем сообщение в базу данных
-    if markov_generator.add_message(chat_id, message):
-        logger.info(f"Сообщение успешно добавлено в базу")
-        
-        # Проверяем статистику
-        stats = markov_generator.db.get_chat_stats(chat_id)
-        logger.info(f"Текущая статистика: {stats}")
-        
-        # Иногда отвечаем на сообщения (33% шанс)
-        if context.bot_data.get('last_response', 0) % 3 == 0:
-            response = markov_generator.generate_response(chat_id)
-            if response:
-                sent_message = await update.message.reply_text(response)
-                
-                # Иногда добавляем реакцию к своему сообщению (10% шанс)
-                if random.random() < 0.1:
-                    try:
-                        await context.bot.set_message_reaction(
-                            chat_id=chat_id,
-                            message_id=sent_message.message_id,
-                            reaction=[ReactionTypeEmoji(emoji=random.choice(REACTIONS))]
-                        )
-                    except Exception as e:
-                        logger.error(f"Ошибка при добавлении реакции к своему сообщению: {e}")
-                    
-        context.bot_data['last_response'] = context.bot_data.get('last_response', 0) + 1
-    else:
-        logger.error(f"Не удалось добавить сообщение в базу")
 
 async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка добавления бота в чат"""
