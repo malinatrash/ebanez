@@ -56,7 +56,6 @@ class MarkovChainGenerator:
             # Получаем сообщения из базы
             messages = self.db.get_messages(chat_id)
             logger.info(f"Получено {len(messages)} сообщений для построения модели")
-            logger.debug(f"Примеры сообщений: {messages[:5]}")
             
             if not messages:
                 logger.warning("Нет сообщений для построения модели")
@@ -67,8 +66,8 @@ class MarkovChainGenerator:
             valid_messages = [msg for msg in messages if msg and len(msg.strip()) > 2]
             logger.info(f"Валидных сообщений: {len(valid_messages)}")
             
-            if not valid_messages:
-                logger.warning("Нет валидных сообщений для построения модели")
+            if len(valid_messages) < self.min_messages:
+                logger.warning(f"Недостаточно сообщений для построения модели (минимум {self.min_messages})")
                 self.model = None
                 return False
                 
@@ -79,30 +78,32 @@ class MarkovChainGenerator:
                 logger.info(f"Создаю модель с state_size={self.state_size}")
                 self.model = markovify.NewlineText(text, state_size=self.state_size, well_formed=False)
                 
-                for _ in range(10):  # Пробуем 10 раз
+                # Пробуем сгенерировать тестовое предложение
+                test_sentence = None
+                for _ in range(5):  # Уменьшаем количество попыток для первой модели
                     test_sentence = self.model.make_short_sentence(
                         max_chars=100,
                         min_chars=1,
                         tries=50
                     )
                     if test_sentence:
-                        logger.info(f"Тестовое предложение: {test_sentence}")
-                        if self.save_model(chat_id):
-                            logger.info("Модель успешно создана и сохранена")
-                            return True
                         break
                 
-                logger.error("Не удалось сгенерировать тестовое предложение")
-                return False
+                if not test_sentence:
+                    logger.warning("Не удалось сгенерировать тестовое предложение")
+                    return False
+                
+                logger.info(f"Тестовое предложение: {test_sentence}")
+                if self.save_model(chat_id):
+                    logger.info("Модель успешно создана и сохранена")
+                    return True
                     
             except Exception as e:
                 logger.error(f"Ошибка при создании модели: {e}")
-                self.model = None
                 return False
                 
         except Exception as e:
             logger.error(f"Ошибка при перестройке модели: {e}")
-            self.model = None
             return False
             
     def save_model(self, chat_id: int) -> bool:
@@ -182,16 +183,28 @@ class MarkovChainGenerator:
     def get_stats(self, chat_id: int) -> str:
         """Получение статистики чата"""
         stats = self.db.get_chat_stats(chat_id)
-        model_size = os.path.getsize(self.get_model_path(chat_id)) // 1024 if self.get_model_path(chat_id).exists() else 0
+        model_path = self.get_model_path(chat_id)
+        model_exists = model_path.exists()
+        model_size = os.path.getsize(model_path) // 1024 if model_exists else 0
+        
+        # Проверяем статус модели
+        if not model_exists:
+            model_status = "❌ Модель не создана"
+        elif stats['total_messages'] < self.min_messages:
+            model_status = f"⚠️ Недостаточно сообщений (нужно минимум {self.min_messages})"
+        else:
+            model_status = "✅ Модель готова"
+        
+        messages_until_rebuild = self.rebuild_threshold - (stats['total_messages'] % self.rebuild_threshold)
         
         return (
-            f"📊 Статистика обучения:\n"
-            f"• Сообщений в базе: {stats['total_messages']}\n"
-            f"• Новых сообщений до перестройки: {self.rebuild_threshold - self.message_counter}\n"
-            f"• Средняя длина сообщения: {stats['avg_message_length']} слов\n"
-            f"• Размер базы: {self.db.get_db_size() // 1024}KB\n"
-            f"• Размер модели: {model_size}KB\n"
-            f"• Готовность к генерации: {'✅' if stats['total_messages'] >= self.min_messages else '❌'}"
+            f"📊 Статистика чата:\\n"
+            f"• Сообщений в базе: {stats['total_messages']}\\n"
+            f"• Средняя длина сообщения: {stats['avg_message_length']:.1f} символов\\n"
+            f"• Размер базы данных: {self.db.get_db_size() // 1024}KB\\n"
+            f"• Размер модели: {model_size}KB\\n"
+            f"• Статус модели: {model_status}\\n"
+            f"• Сообщений до следующей перестройки: {messages_until_rebuild}"
         )
 
     def clear_memory(self, chat_id: int) -> bool:

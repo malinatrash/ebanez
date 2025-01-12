@@ -27,7 +27,16 @@ def main():
     
     logging.info(f"Token starts with: {token[:10]}...")
     
-    application = Application.builder().token(token).build()
+    # Configure application with timeout settings
+    application = (
+        Application.builder()
+        .token(token)
+        .connect_timeout(30.0)  # 30 seconds connection timeout
+        .read_timeout(30.0)     # 30 seconds read timeout
+        .write_timeout(30.0)    # 30 seconds write timeout
+        .pool_timeout(30.0)     # 30 seconds pool timeout
+        .build()
+    )
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -44,6 +53,16 @@ def main():
         (filters.TEXT | filters.Sticker.ALL) & ~filters.COMMAND,
         handle_message
     ))
+    
+    # Add error handler
+    async def error_handler(update, context):
+        logging.error(f"Exception while handling an update: {context.error}")
+        if update and update.message:
+            await update.message.reply_text(
+                "⚠️ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже."
+            )
+    
+    application.add_error_handler(error_handler)
     
     logging.info("Starting bot...")
     application.run_polling()

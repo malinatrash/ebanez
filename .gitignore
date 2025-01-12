@@ -21,3 +21,4 @@ venv.bak/
 # Project specific
 logs/
 *.log
+data/*
