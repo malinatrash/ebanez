@@ -82,8 +82,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text:
         message_text = update.message.text.strip()
         
-        # Пропускаем команды
-        if message_text.startswith('/'):
+        # Пропускаем команды и короткие сообщения
+        if message_text.startswith('/') or len(message_text.split()) < 2:
             return
             
         # Добавляем сообщение в базу для обучения
@@ -100,18 +100,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Отвечаем на сообщения только если модель существует
         if model_path.exists():
-            # 30% шанс ответить сообщением
-            if random.random() < 0.3:
+            response_type = random.random()
+            
+            # 25% шанс ответить сообщением
+            if response_type < 0.25:
                 response = markov_generator.generate_response(chat_id)
-                if response:
+                if response and response != message_text:  # Не повторяем то же самое сообщение
                     try:
                         await update.message.reply_text(response)
                         logger.info(f"Отправлен ответ: {response}")
                     except Exception as e:
                         logger.error(f"Ошибка при отправке ответа: {e}")
                         
-            # 20% шанс добавить реакцию
-            elif random.random() < 0.2:
+            # 15% шанс добавить реакцию
+            elif response_type < 0.40:
                 try:
                     reaction = random.choice(REACTIONS)
                     await update.message.set_reaction([ReactionTypeEmoji(reaction)])
@@ -119,8 +121,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Ошибка при добавлении реакции: {e}")
                     
-            # 20% шанс отправить стикер
-            elif random.random() < 0.2:
+            # 10% шанс отправить стикер
+            elif response_type < 0.50:
                 sticker_id = sticker_storage.get_random_sticker(chat_id)
                 if sticker_id:
                     try:
