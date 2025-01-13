@@ -83,3 +83,16 @@ class StickerStorage:
         stickers = self.stickers.get(chat_id_str, [])
         logger.info(f"Получено {len(stickers)} стикеров для чата {chat_id}")
         return stickers
+        
+    def get_random_sticker(self, chat_id: int) -> str:
+        """Получить случайный стикер из доступных для чата"""
+        import random
+        
+        stickers = self.get_stickers(chat_id)
+        if not stickers:
+            logger.info(f"Нет доступных стикеров для чата {chat_id}")
+            return None
+            
+        sticker_id = random.choice(stickers)
+        logger.info(f"Выбран случайный стикер {sticker_id} для чата {chat_id}")
+        return sticker_id

@@ -2,14 +2,17 @@ from telegram import Update, ReactionTypeEmoji
 from telegram.ext import ContextTypes
 from ..services.markov_chain import MarkovChainGenerator
 from ..services.sticker_storage import StickerStorage
+from ..services.weather_service import WeatherService
 import logging
 import random
+import asyncio
 
 # Настраиваем логирование
 logger = logging.getLogger(__name__)
 
 markov_generator = MarkovChainGenerator()
 sticker_storage = StickerStorage()
+weather_service = WeatherService()
 
 # Эмодзи для реакций
 REACTIONS = [
@@ -85,44 +88,62 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         # Добавляем сообщение в базу для обучения
         message_added, is_valid = markov_generator.add_message(chat_id, message_text)
+        model_path = markov_generator.get_model_path(chat_id)
         
-        if message_added:
-            # Если модель еще не создана и сообщение валидное - реагируем 👀
-            model_path = markov_generator.get_model_path(chat_id)
-            if not model_path.exists() and is_valid:
-                try:
-                    await update.message.set_reaction([ReactionTypeEmoji("👀")])
-                    logger.info("Добавлена реакция 👀 к сообщению (валидное для обучения)")
-                except Exception as e:
-                    logger.error(f"Ошибка при добавлении реакции: {e}")
-            
-            # Случайным образом отвечаем на сообщение
-            if not model_path.exists() and random.random() < 0.1:  # 10% шанс
+        # Реагируем на валидные сообщения при сборе данных
+        if message_added and not model_path.exists() and is_valid:
+            try:
+                await update.message.set_reaction([ReactionTypeEmoji("👀")])
+                logger.info("Добавлена реакция 👀 к сообщению (валидное для обучения)")
+            except Exception as e:
+                logger.error(f"Ошибка при добавлении реакции: {e}")
+        
+        # Отвечаем на сообщения только если модель существует
+        if model_path.exists():
+            # 30% шанс ответить сообщением
+            if random.random() < 0.3:
                 response = markov_generator.generate_response(chat_id)
                 if response:
                     try:
                         await update.message.reply_text(response)
+                        logger.info(f"Отправлен ответ: {response}")
                     except Exception as e:
                         logger.error(f"Ошибка при отправке ответа: {e}")
-    
-    # Случайным образом добавляем реакцию (20% шанс)
-    if random.random() < 0.2:
-        try:
-            await update.message.set_reaction([ReactionTypeEmoji(random.choice(REACTIONS))])
-            logger.info(f"Добавлена реакция {random.choice(REACTIONS)} к сообщению")
-        except Exception as e:
-            logger.error(f"Ошибка при добавлении реакции: {e}")
+                        
+            # 20% шанс добавить реакцию
+            elif random.random() < 0.2:
+                try:
+                    reaction = random.choice(REACTIONS)
+                    await update.message.set_reaction([ReactionTypeEmoji(reaction)])
+                    logger.info(f"Добавлена реакция {reaction} к сообщению")
+                except Exception as e:
+                    logger.error(f"Ошибка при добавлении реакции: {e}")
+                    
+            # 20% шанс отправить стикер
+            elif random.random() < 0.2:
+                sticker_id = sticker_storage.get_random_sticker(chat_id)
+                if sticker_id:
+                    try:
+                        await update.message.reply_sticker(sticker_id)
+                        logger.info(f"Отправлен стикер {sticker_id}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке стикера: {str(e)}")
+                else:
+                    logger.info(f"Нет доступных стикеров для chat_id={chat_id}")
 
-    # Случайным образом отправляем стикер (10% шанс)
-    if random.random() < 0.1:
-        sticker_id = sticker_storage.get_random_sticker(chat_id)
-        if sticker_id:
-            try:
-                await update.message.reply_sticker(sticker_id)
-            except Exception as e:
-                logger.error(f"Ошибка при отправке стикера: {str(e)}")
-        else:
-            logger.info(f"Нет доступных стикеров для chat_id={chat_id}")
+async def handle_weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /weather - отправляет информацию о погоде"""
+    chat_id = update.effective_chat.id
+    logger.info(f"Получена команда /weather в чате {chat_id}")
+    
+    try:
+        weather_message = await weather_service.get_weather_and_traffic()
+        await update.message.reply_text(weather_message)
+        logger.info(f"Отправлена информация о погоде в чат {chat_id}")
+    except Exception as e:
+        error_message = "Произошла ошибка при получении информации о погоде 😔"
+        await update.message.reply_text(error_message)
+        logger.error(f"Ошибка при обработке команды /weather: {e}")
 
 async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка добавления бота в чат"""
@@ -169,3 +190,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'option2':
         stats = markov_generator.get_stats()
         await query.message.reply_text(stats)
+
+async def send_weather_updates(context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет обновления погоды в активированные группы"""
+    while True:
+        try:
+            weather_message = await weather_service.get_weather_and_traffic()
+            
+            for chat_id in weather_service.weather_enabled_groups:
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=weather_message)
+                    logger.info(f"Отправлено сообщение о погоде в чат {chat_id}")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке погоды в чат {chat_id}: {e}")
+                    
+            # Ждем 3 часа перед следующим обновлением
+            await asyncio.sleep(10800)  # 3 часа в секундах
+            
+        except Exception as e:
+            logger.error(f"Ошибка в цикле отправки погоды: {e}")
+            await asyncio.sleep(300)  # Подождем 5 минут перед повторной попыткой

@@ -14,7 +14,11 @@ from src.handlers.command_handlers import (
     top_command,
     mood_command
 )
-from src.handlers.message_handlers import handle_message, handle_my_chat_member
+from src.handlers.message_handlers import (
+    handle_message, 
+    handle_my_chat_member, 
+    handle_weather_command
+)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -49,6 +53,7 @@ def main():
     application.add_handler(CommandHandler("sticker", sticker_command))
     application.add_handler(CommandHandler("top", top_command))
     application.add_handler(CommandHandler("mood", mood_command))
+    application.add_handler(CommandHandler("weather", handle_weather_command))
     
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     
