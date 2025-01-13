@@ -279,7 +279,7 @@ class MarkovChainGenerator:
             f"└─ Всего в базе: `{stats['total_messages']}`\n"
             f"└─ Средняя длина: `{stats['avg_message_length']:.1f}` символов\n\n"
             f"*Хранилище:*\n"
-            f"└─ База данных: `{self.db.get_db_size() // 1024}KB`\n"
+            f"└─ База данных: `{self.db.get_database_size() // 1024}KB`\n"
             f"└─ Модель: `{model_size}KB`\n\n"
             f"*Состояние модели:*\n"
             f"└─ Статус: {model_status}\n"

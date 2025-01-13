@@ -115,3 +115,14 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении размера базы данных: {e}")
             return 0
+
+    def clear_chat_history(self, chat_id: int) -> bool:
+        """Очистка истории конкретного чата"""
+        try:
+            result = self.messages.delete_many({'chat_id': chat_id})
+            deleted_count = result.deleted_count
+            logger.info(f"Удалено {deleted_count} сообщений для chat_id={chat_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при очистке истории чата: {e}")
+            return False
