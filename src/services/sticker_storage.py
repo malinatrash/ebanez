@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class StickerStorage:
     def __init__(self):
         # Получаем URI из переменной окружения или используем значение по умолчанию
-        mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/ebanez')
+        mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://:27017/ebanez')
         self.client = MongoClient(mongodb_uri)
         self.db: MongoDatabase = self.client.get_database()
         self.stickers: Collection = self.db.stickers

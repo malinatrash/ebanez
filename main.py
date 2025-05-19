@@ -29,7 +29,7 @@ def main():
     load_dotenv()    
     token = os.getenv('BOT_TOKEN')
     if not token:
-        raise ValueError("Не найден токен бота. Создайте файл .env с переменной BOT_TOKEN")
+        raise ValueError("Не найден токен бота. Создайте файл .example.env с переменной BOT_TOKEN")
     
     logging.info(f"Token starts with: {token[:10]}...")
     
