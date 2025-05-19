@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
-        # Получаем URI из переменной окружения или используем значение по умолчанию
+
         mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/ebanez')
         self.client = MongoClient(mongodb_uri)
         self.db: MongoDatabase = self.client.get_database()
@@ -21,13 +21,13 @@ class Database:
     def init_db(self):
         """Инициализация базы данных"""
         try:
-            # Создаем индекс для быстрого поиска по chat_id
+
             self.messages.create_index('chat_id')
             
-            # Проверяем подключение
+
             self.db.command('ping')
             
-            # Получаем количество сообщений
+
             count = self.messages.count_documents({})
             logger.info(f"В коллекции messages {count} документов")
             logger.info("База данных MongoDB успешно инициализирована")
