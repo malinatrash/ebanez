@@ -103,7 +103,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response_type = random.random()
             
             # 25% шанс ответить сообщением
-            if response_type < 0.25:
+            if response_type < 0.15:
                 response = markov_generator.generate_response(chat_id)
                 if response and response != message_text:  # Не повторяем то же самое сообщение
                     try:
@@ -113,7 +113,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.error(f"Ошибка при отправке ответа: {e}")
                         
             # 15% шанс добавить реакцию
-            elif response_type < 0.40:
+            elif response_type < 0.10:
                 try:
                     reaction = random.choice(REACTIONS)
                     await update.message.set_reaction([ReactionTypeEmoji(reaction)])
@@ -122,7 +122,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error(f"Ошибка при добавлении реакции: {e}")
                     
             # 10% шанс отправить стикер
-            elif response_type < 0.50:
+            elif response_type < 0.10:
                 sticker_id = sticker_storage.get_random_sticker(chat_id)
                 if sticker_id:
                     try:
