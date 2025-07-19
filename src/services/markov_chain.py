@@ -8,7 +8,7 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 class MarkovChainGenerator:
-    def __init__(self, state_size=2, min_messages=20):
+    def __init__(self, state_size=3, min_messages=50):
         """Инициализация генератора"""
         self.db = Database()
         self.state_size = state_size
@@ -34,18 +34,25 @@ class MarkovChainGenerator:
         # Убираем пробелы в начале и конце
         message = message.strip()
         
-        # Проверяем минимальную длину (3 символа)
-        if len(message) < 3:
+        # Проверяем минимальную длину (2 символа)
+        if len(message) < 2:
             return False
             
-        # Проверяем, что сообщение содержит хотя бы одно слово из букв
-        has_word = any(word.isalpha() for word in message.split())
-        if not has_word:
+        # Игнорируем команды и ссылки
+        if message.startswith('/') or 'http' in message or 'www.' in message:
+            return False
+            
+        # Разбиваем на слова и проверяем количество значимых слов
+        words = [w for w in message.split() if len(w) > 1 or w.isalpha()]
+        if len(words) < 1:  # Хотя бы одно значимое слово
             return False
             
         # Проверяем, что сообщение не состоит только из повторяющихся символов
-        unique_chars = set(message.lower())
-        if len(unique_chars) < 2:
+        if len(set(message.lower())) < 2:
+            return False
+            
+        # Игнорируем сообщения, состоящие только из цифр и знаков препинания
+        if not any(c.isalpha() for c in message):
             return False
             
         return True
@@ -92,8 +99,18 @@ class MarkovChainGenerator:
             return False, False
 
     def rebuild_model(self, chat_id: int):
-        """Перестройка модели на основе всех сообщений чата"""
+        """
+        Перестройка модели на основе всех сообщений чата
+        
+        Args:
+            chat_id: ID чата для перестройки модели
+            
+        Returns:
+            bool: True если модель успешно перестроена, иначе False
+        """
         try:
+            logger.info(f"Начало перестройки модели для чата {chat_id}")
+            
             # Получаем сообщения из базы
             messages = self.db.get_messages(chat_id)
             logger.info(f"Получено {len(messages)} сообщений для построения модели")
@@ -101,68 +118,104 @@ class MarkovChainGenerator:
             if not messages:
                 logger.warning("Нет сообщений для построения модели")
                 self.models[chat_id] = None
+                self.save_model(chat_id)  # Сохраняем пустую модель
                 return False
 
             # Фильтруем и подготавливаем сообщения
             valid_messages = []
             for msg in messages:
                 if self.is_valid_message(msg):
-                    # Добавляем маркеры начала и конца предложения
-                    processed_msg = f"START {msg.strip()} END"
-                    valid_messages.append(processed_msg)
+                    # Очищаем и форматируем сообщение
+                    msg = msg.strip()
+                    # Удаляем упоминания и команды
+                    msg = ' '.join(word for word in msg.split() 
+                                 if not (word.startswith('@') or word.startswith('/')))
+                    if len(msg) > 1:  # Проверяем, что осталось что-то осмысленное
+                        # Добавляем маркеры начала и конца предложения
+                        processed_msg = f"START {msg} END"
+                        valid_messages.append(processed_msg)
                     
-            logger.info(f"Валидных сообщений: {len(valid_messages)}")
+            logger.info(f"Валидных сообщений после фильтрации: {len(valid_messages)}")
             
             if len(valid_messages) < self.min_messages:
                 logger.warning(f"Недостаточно сообщений для построения модели (минимум {self.min_messages})")
+                self.models[chat_id] = None
+                self.save_model(chat_id)  # Сохраняем пустую модель
                 return False
 
             # Объединяем сообщения, добавляя перенос строки между ними
             text = "\n".join(valid_messages)
+            
+            # Сохраняем сырой текст для отладки
+            debug_path = self.models_dir / f"debug_{chat_id}.txt"
+            with open(debug_path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            logger.info(f"Сохранен отладочный файл: {debug_path}")
 
             try:
                 logger.info(f"Создаю модель с state_size={self.state_size}")
-                self.models[chat_id] = markovify.NewlineText(
+                
+                # Создаем модель с настройками для лучшей генерации
+                model = markovify.NewlineText(
                     text, 
                     state_size=self.state_size,
-                    well_formed=True,  # Включаем проверку правильности формирования
-                    retain_original=False  # Экономим память
+                    well_formed=False,  # Отключаем строгую проверку для большей гибкости
+                    retain_original=True,  # Сохраняем оригинальные предложения
+                    max_overlap_ratio=0.7,  # Разрешаем большее перекрытие
+                    max_overlap_total=15    # Увеличиваем максимальное перекрытие
                 )
                 
-                # Пробуем сгенерировать тестовое предложение
-                test_sentence = None
-                for _ in range(15):  # Больше попыток для лучшего результата
+                # Тестируем модель
+                test_success = False
+                test_sentences = []
+                
+                for _ in range(10):  # Делаем несколько попыток генерации
                     try:
-                        test_sentence = self.models[chat_id].make_sentence(
-                            max_words=20,  # Увеличиваем максимальное количество слов
-                            min_words=3,   # Минимум 3 слова для осмысленности
-                            tries=150,     # Больше попыток генерации
+                        sentence = model.make_sentence(
+                            max_words=25,
+                            min_words=3,
+                            tries=100,
                             test_output=False
                         )
-                        if test_sentence:
-                            # Убираем маркеры и лишние пробелы
-                            test_sentence = test_sentence.replace("START ", "").replace(" END", "").strip()
-                            if len(test_sentence.split()) >= 3:  # Проверяем минимальную длину
-                                break
+                        if sentence:
+                            sentence = sentence.replace("START ", "").replace(" END", "").strip()
+                            if len(sentence.split()) >= 3:  # Проверяем минимальную длину
+                                test_sentences.append(sentence)
+                                if len(test_sentences) >= 3:  # Нужно минимум 3 валидных предложения
+                                    test_success = True
+                                    break
                     except Exception as e:
-                        logger.warning(f"Ошибка при генерации тестового предложения: {e}")
-                        continue
+                        logger.warning(f"Ошибка при тестовой генерации: {e}")
                 
-                if not test_sentence:
-                    logger.warning("Не удалось сгенерировать тестовое предложение")
+                if not test_success:
+                    logger.error("Не удалось сгенерировать тестовые предложения")
+                    if test_sentences:
+                        logger.info(f"Полученные тестовые предложения: {test_sentences}")
+                    self.models[chat_id] = None
+                    self.save_model(chat_id)
                     return False
                 
-                logger.info(f"Тестовое предложение: {test_sentence}")
-                if self.save_model(chat_id):
-                    logger.info("Модель успешно создана и сохранена")
-                    return True
-                    
+                logger.info(f"Тестовые предложения: {' | '.join(test_sentences[:3])}")
+                
+                # Сохраняем модель
+                self.models[chat_id] = model
+                if not self.save_model(chat_id):
+                    logger.error("Не удалось сохранить модель")
+                    return False
+                
+                logger.info(f"Модель успешно перестроена и сохранена для чата {chat_id}")
+                return True
+                
             except Exception as e:
-                logger.error(f"Ошибка при создании модели: {e}")
+                logger.error(f"Ошибка при создании модели: {e}", exc_info=True)
+                self.models[chat_id] = None
+                self.save_model(chat_id)
                 return False
                 
         except Exception as e:
-            logger.error(f"Ошибка при перестройке модели: {e}")
+            logger.error(f"Критическая ошибка при перестройке модели: {e}", exc_info=True)
+            self.models[chat_id] = None
+            self.save_model(chat_id)
             return False
 
     def save_model(self, chat_id: int) -> bool:
@@ -216,36 +269,111 @@ class MarkovChainGenerator:
             self.models[chat_id] = None
             return False
 
-    def generate_response(self, chat_id: int) -> str:
-        """Генерация ответа на основе модели"""
+    def generate_response(self, chat_id: int, input_text: str = None) -> str:
+        """
+        Генерация ответа на основе модели
+        
+        Args:
+            chat_id: ID чата
+            input_text: Опциональный текст для контекста генерации
+            
+        Returns:
+            str: Сгенерированный ответ или None в случае ошибки
+        """
         try:
             if chat_id not in self.models or not self.models[chat_id]:
                 if not self.load_model(chat_id):
                     return None
-                    
-            # Пробуем сгенерировать предложение с разными параметрами
-            for _ in range(20):  # Больше попыток для лучшего результата
+            
+            # Пробуем разные стратегии генерации
+            strategies = [
+                # Базовая генерация
+                {
+                    'max_words': 25,
+                    'min_words': 5,
+                    'tries': 100,
+                    'max_overlap_ratio': 0.7,
+                    'max_overlap_total': 15,
+                    'max_retries': 30
+                },
+                # Более длинные ответы
+                {
+                    'max_words': 40,
+                    'min_words': 8,
+                    'tries': 150,
+                    'max_overlap_ratio': 0.6,
+                    'max_overlap_total': 12,
+                    'max_retries': 40
+                },
+                # Короткие реплики
+                {
+                    'max_words': 15,
+                    'min_words': 3,
+                    'tries': 80,
+                    'max_overlap_ratio': 0.8,
+                    'max_overlap_total': 20,
+                    'max_retries': 50
+                }
+            ]
+            
+            # Если есть входящий текст, пробуем использовать его как основу
+            if input_text and len(input_text.split()) > 2:
                 try:
-                    response = self.models[chat_id].make_sentence(
-                        max_words=20,  # Увеличиваем максимум слов
-                        min_words=3,   # Минимум 3 слова
-                        tries=150,     # Больше попыток
-                        test_output=False
-                    )
-                    if response:
-                        # Убираем маркеры и лишние пробелы
-                        response = response.replace("START ", "").replace(" END", "").strip()
-                        if len(response.split()) >= 3:  # Проверяем минимальную длину
-                            return response
+                    # Пробуем сгенерировать ответ, начиная с ключевых слов из ввода
+                    keywords = [word for word in input_text.split() if len(word) > 3][:3]
+                    if keywords:
+                        start = random.choice(keywords)
+                        response = self.models[chat_id].make_sentence_with_start(
+                            start,
+                            strict=False,
+                            max_words=30,
+                            min_words=5,
+                            tries=100,
+                            max_overlap_ratio=0.7,
+                            max_overlap_total=15
+                        )
+                        if response:
+                            response = response.replace("START ", "").replace(" END", "").strip()
+                            if len(response.split()) >= 3:
+                                return response
                 except Exception as e:
-                    logger.warning(f"Ошибка при генерации ответа: {e}")
-                    continue
-                    
-            logger.error("Не удалось сгенерировать ответ")
+                    logger.warning(f"Ошибка при генерации ответа с началом: {e}")
+            
+            # Пробуем разные стратегии генерации
+            for strategy in strategies:
+                for _ in range(3):  # Пробуем каждую стратегию несколько раз
+                    try:
+                        response = self.models[chat_id].make_sentence(
+                            max_words=strategy['max_words'],
+                            min_words=strategy['min_words'],
+                            tries=strategy['tries'],
+                            test_output=False,
+                            max_overlap_ratio=strategy['max_overlap_ratio'],
+                            max_overlap_total=strategy['max_overlap_total'],
+                            max_retries=strategy['max_retries']
+                        )
+                        
+                        if response:
+                            # Убираем маркеры и лишние пробелы
+                            response = response.replace("START ", "").replace(" END", "").strip()
+                            words = response.split()
+                            
+                            # Проверяем минимальную длину и что ответ не совпадает с вводом
+                            if len(words) >= 3 and (not input_text or response.lower() != input_text.lower()):
+                                # Добавляем знаки препинания, если их нет
+                                if not response[-1] in '.!?…':
+                                    response += random.choice(['.', '!', '?', '...'])
+                                return response
+                                
+                    except Exception as e:
+                        logger.warning(f"Ошибка при генерации ответа: {e}")
+                        continue
+            
+            logger.warning("Не удалось сгенерировать ответ после нескольких попыток")
             return None
             
         except Exception as e:
-            logger.error(f"Ошибка при генерации ответа: {e}")
+            logger.error(f"Критическая ошибка при генерации ответа: {e}", exc_info=True)
             return None
 
     def get_stats(self, chat_id: int) -> str:

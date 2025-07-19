@@ -44,8 +44,39 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def generate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сгенерировать сообщение"""
     chat_id = update.effective_chat.id
-    response = markov_generator.generate_response(chat_id)
-    await update.message.reply_text(response)
+    
+    # Пробуем использовать текст после команды как контекст
+    input_text = None
+    if context.args:
+        input_text = ' '.join(context.args)
+    
+    # Показываем статус генерации
+    status_msg = await update.message.reply_text("🔄 Генерирую ответ...")
+    
+    try:
+        # Генерируем ответ с учетом контекста
+        response = markov_generator.generate_response(chat_id, input_text)
+        
+        if response:
+            # Редактируем сообщение с результатом
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text=response
+            )
+        else:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text="❌ Не удалось сгенерировать ответ. Попробуйте еще раз или подождите, пока бот наберется больше данных."
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при генерации ответа: {e}")
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status_msg.message_id,
+            text="⚠️ Произошла ошибка при генерации ответа. Пожалуйста, попробуйте позже."
+        )
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Очистить память чата"""
