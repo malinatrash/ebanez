@@ -210,13 +210,13 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         # Получаем историю сообщений
         messages = []
         try:
-            async with context.application.bot.get_chat(chat_id) as chat:
-                async for message in chat.get_messages(limit=100):
-                    if message.text and not message.text.startswith('/'):
-                        messages.append(message)
-            logger.info(f"Получено {len(messages)} сообщений из истории")
+            chat = await context.bot.get_chat(chat_id)
+            # Note: get_messages is not directly available in python-telegram-bot
+            # This needs to be implemented using get_updates or another method
+            logger.warning("Получение истории сообщений не реализовано")
         except Exception as e:
             logger.error(f"Ошибка при получении истории: {e}")
+            logger.exception("Подробности ошибки:")
 
         # Добавляем сообщения в базу
         added_count = 0
